@@ -343,55 +343,79 @@ function renderTriangle() {
 
   document.getElementById('how-to-read').style.display = '';
 
-  // Collect every record that appears with a positive count in any round
-  const allRecords = new Set();
+  // Collect all match-point values that appear across any round
+  const allMatchPoints = new Set();
   for (const rd of roundData) {
     for (const [rec, count] of Object.entries(rd)) {
-      if (count > 0) allRecords.add(rec);
+      if (count > 0) allMatchPoints.add(matchPoints(rec));
     }
   }
 
-  // Sort: match points descending, then wins descending, then draws descending
-  const sorted = [...allRecords].sort((a, b) => {
-    const ptsDiff = matchPoints(b) - matchPoints(a);
-    if (ptsDiff !== 0) return ptsDiff;
-    const pa = parseRecord(a);
-    const pb = parseRecord(b);
-    if (pb.w !== pa.w) return pb.w - pa.w;
-    return pb.d - pa.d;
-  });
+  // Sort columns by match points descending (best record on left)
+  const sortedPts = [...allMatchPoints].sort((a, b) => b - a);
 
   // Find maximum count for proportional colour shading
   const allCounts = roundData.flatMap(rd => Object.values(rd).filter(v => v > 0));
   const maxCount = allCounts.length > 0 ? Math.max(...allCounts) : 1;
 
+  // Build column header labels
   let html = '<div class="table-container">';
   html += '<table class="table is-bordered is-hoverable is-fullwidth" aria-label="Swiss tournament record distribution">';
   html += '<thead><tr>';
-  html += '<th scope="col" class="record-label">Record</th>';
-  html += '<th scope="col">Pts</th>';
-  for (let r = 0; r < roundData.length; r++) {
-    const label = r === 0 ? 'Start' : `After R${r}`;
-    html += `<th scope="col">${label}</th>`;
+  html += '<th scope="col">Round</th>';
+  for (const pts of sortedPts) {
+    const label = pts === 1 ? '1 pt' : `${pts} pts`;
+    html += `<th scope="col" class="has-text-centered">${label}</th>`;
   }
   html += '</tr></thead>';
   html += '<tbody>';
 
-  for (const rec of sorted) {
-    const pts = matchPoints(rec);
+  // One row per round
+  for (let r = 0; r < roundData.length; r++) {
+    const roundLabel = r === 0 ? 'Start' : `After R${r}`;
     html += '<tr>';
-    html += `<th scope="row" class="record-label">${displayRecord(rec)} <span class="has-text-grey-light is-size-7">(${pts} pts)</span></th>`;
-    html += `<td class="has-text-centered">${pts}</td>`;
-    for (let r = 0; r < roundData.length; r++) {
-      const count = roundData[r][rec] || 0;
-      if (count > 0) {
-        // Opacity: min 10%, max 40%, proportional to count
-        const intensity = 0.10 + (count / maxCount) * 0.30;
-        html += `<td class="triangle-cell" style="background:rgba(50,115,220,${intensity.toFixed(2)})">${count}</td>`;
-      } else {
+    html += `<th scope="row" class="round-label">${roundLabel}</th>`;
+
+    // Group this round's records by match points
+    const roundGroups = {};
+    for (const [rec, count] of Object.entries(roundData[r])) {
+      if (count <= 0) continue;
+      const pts = matchPoints(rec);
+      if (!roundGroups[pts]) roundGroups[pts] = [];
+      roundGroups[pts].push({ rec, count });
+    }
+
+    for (const pts of sortedPts) {
+      const entries = roundGroups[pts];
+      if (!entries || entries.length === 0) {
         html += '<td class="triangle-cell"></td>';
+        continue;
+      }
+
+      // Total count in this cell for shading
+      const cellTotal = entries.reduce((s, e) => s + e.count, 0);
+      const intensity = 0.10 + (cellTotal / maxCount) * 0.30;
+      const bg = `background:rgba(50,115,220,${intensity.toFixed(2)})`;
+
+      if (entries.length === 1) {
+        // Single record at this match-point level
+        const { rec, count } = entries[0];
+        html += `<td class="triangle-cell" style="${bg}">`;
+        html += `<div class="cell-count">${count}</div>`;
+        html += `<div class="cell-record">${displayRecord(rec)}</div>`;
+        html += '</td>';
+      } else {
+        // Multiple records at same match points (rare, e.g. 1-2 and 0-0-3)
+        // Sort by wins descending
+        entries.sort((a, b) => parseRecord(b.rec).w - parseRecord(a.rec).w);
+        html += `<td class="triangle-cell cell-multi-record" style="${bg}">`;
+        for (const { rec, count } of entries) {
+          html += `<div><span class="cell-count">${count}</span> <span class="cell-record">${displayRecord(rec)}</span></div>`;
+        }
+        html += '</td>';
       }
     }
+
     html += '</tr>';
   }
 
@@ -404,14 +428,174 @@ function renderTriangle() {
 // ============================================================
 
 /**
+ * Simulate the carry-down chain for a round to determine:
+ * - How many within-group games each group has (for draw input max)
+ * - Which groups send a carry-down and the actual records involved
+ *
+ * Returns an array of group info objects (top-down by match points):
+ *   { pts, originalCount, withinGames, pairedDownGame, receivesCarryDown, isBottomBye }
+ *
+ * pairedDownGame (if this group sends a carry-down to a lower group):
+ *   { carryRecord, opponentRecord, sourcePts }
+ *
+ * This mirrors processRound logic but only tracks structure, not results.
+ */
+function computeRoundPairingInfo(prevDist, roundNum, byes) {
+  const dist = Object.assign({}, prevDist);
+
+  // Remove bye players
+  for (let i = 0; i < byes.length; i++) {
+    if (roundNum <= (i + 1) && byes[i] > 0) {
+      const byeRec = recordKey(roundNum - 1, 0, 0);
+      const available = dist[byeRec] || 0;
+      const removing = Math.min(byes[i], available);
+      dist[byeRec] = available - removing;
+      if (dist[byeRec] <= 0) delete dist[byeRec];
+    }
+  }
+
+  const groups = groupByMatchPoints(dist);
+  const sortedPts = Object.keys(groups).map(Number).sort((a, b) => b - a);
+
+  const info = [];
+  let carryDown = null; // { record, sourcePts }
+
+  for (let gi = 0; gi < sortedPts.length; gi++) {
+    const pts = sortedPts[gi];
+    const records = Object.assign({}, groups[pts]);
+    const originalCount = sumValues(records);
+
+    let receivesCarryDown = false;
+
+    // Absorb incoming carry-down: resolve the carry-down game,
+    // removing 1 opponent from this group's pool
+    if (carryDown !== null) {
+      receivesCarryDown = true;
+      const opponentEntries = Object.entries(records)
+        .filter(([, c]) => c > 0)
+        .sort((a, b) => b[1] - a[1]);
+
+      if (opponentEntries.length > 0) {
+        const [oppRec] = opponentEntries[0];
+        records[oppRec] -= 1;
+        if (records[oppRec] <= 0) delete records[oppRec];
+      }
+      carryDown = null;
+    }
+
+    // Within-record pairing for remaining players
+    const recordEntries = Object.entries(records).filter(([, c]) => c > 0);
+    const remainingTotal = recordEntries.reduce((s, [, c]) => s + c, 0);
+    const withinGames = Math.floor(remainingTotal / 2);
+
+    // Determine leftovers
+    const leftovers = [];
+    for (const [rec, count] of recordEntries) {
+      if (count % 2 === 1) leftovers.push(rec);
+    }
+    leftovers.sort((a, b) => matchPoints(b) - matchPoints(a));
+    while (leftovers.length >= 2) {
+      leftovers.shift();
+      leftovers.shift();
+    }
+
+    let outgoingRecord = null;
+    if (leftovers.length === 1) {
+      outgoingRecord = leftovers[0];
+      carryDown = { record: leftovers[0], sourcePts: pts };
+    }
+
+    info.push({
+      pts,
+      originalCount,
+      withinGames,
+      outgoingRecord,
+      receivesCarryDown,
+      pairedDownGame: null, // filled in below
+      isBottomBye: false    // filled in below
+    });
+  }
+
+  // Now link each outgoing carry-down to its opponent in the next group
+  for (let i = 0; i < info.length; i++) {
+    if (!info[i].outgoingRecord) continue;
+
+    // Find the next group that receives this carry-down
+    if (i + 1 < info.length) {
+      // Replay the opponent lookup for this specific carry-down
+      const nextPts = info[i + 1].pts;
+      const nextRecords = Object.assign({}, groups[nextPts]);
+
+      // If the next group itself received a carry-down from an even higher group,
+      // that carry-down already consumed one opponent. We need to replay the full
+      // chain to find the correct opponent. Fortunately, we already did this above
+      // when computing the info array. We can re-derive the opponent by replaying
+      // just the carry-down absorption for groups above nextPts.
+      const replayDist = Object.assign({}, prevDist);
+      // Remove byes
+      for (let bi = 0; bi < byes.length; bi++) {
+        if (roundNum <= (bi + 1) && byes[bi] > 0) {
+          const byeRec = recordKey(roundNum - 1, 0, 0);
+          const available = replayDist[byeRec] || 0;
+          const removing = Math.min(byes[bi], available);
+          replayDist[byeRec] = available - removing;
+          if (replayDist[byeRec] <= 0) delete replayDist[byeRec];
+        }
+      }
+      const replayGroups = groupByMatchPoints(replayDist);
+
+      // Replay carry-down chain from top down to find the actual opponent
+      let replayCD = null;
+      for (let ri = 0; ri <= i + 1 && ri < info.length; ri++) {
+        const rPts = info[ri].pts;
+        const rRecords = Object.assign({}, replayGroups[rPts] || {});
+
+        if (replayCD !== null) {
+          const oppEntries = Object.entries(rRecords)
+            .filter(([, c]) => c > 0)
+            .sort((a, b) => b[1] - a[1]);
+          if (oppEntries.length > 0) {
+            const [oppRec] = oppEntries[0];
+            if (ri === i + 1) {
+              // This is the group our carry-down lands in
+              info[i].pairedDownGame = {
+                carryRecord: info[i].outgoingRecord,
+                opponentRecord: oppRec,
+                sourcePts: info[i].pts
+              };
+            }
+            rRecords[oppRec] -= 1;
+            if (rRecords[oppRec] <= 0) delete rRecords[oppRec];
+          }
+          replayCD = null;
+        }
+
+        // Compute leftovers for this replay group
+        const rEntries = Object.entries(rRecords).filter(([, c]) => c > 0);
+        const rLeftovers = [];
+        for (const [rec, count] of rEntries) {
+          if (count % 2 === 1) rLeftovers.push(rec);
+        }
+        rLeftovers.sort((a, b) => matchPoints(b) - matchPoints(a));
+        while (rLeftovers.length >= 2) {
+          rLeftovers.shift();
+          rLeftovers.shift();
+        }
+        if (rLeftovers.length === 1) {
+          replayCD = { record: rLeftovers[0], sourcePts: rPts };
+        }
+      }
+    } else {
+      // No lower group — this carry-down gets a bye
+      info[i].isBottomBye = true;
+    }
+  }
+
+  return info;
+}
+
+/**
  * Build the per-round collapsible panels.
- *
- * For each round we show each match-point group from the PREVIOUS round's
- * distribution (those are the players who will be paired in this round).
- *
- * Paired-down label uses ACTUAL records so it reads e.g.
- *   "Paired-down game: 1-0 vs 0-1"
- * with a select showing "1-0 player wins / 1-0 player loses / Draw".
  */
 function renderDrawControls() {
   const roundData = state.triangleData;
@@ -423,16 +607,8 @@ function renderDrawControls() {
     const prevDist = roundData[r - 1];
     if (!prevDist) continue;
 
-    // Temporarily replay the round to discover the actual paired-down pairing
-    // (carry-down record and its opponent record) for labelling purposes.
-    const pdLabels = computePairedDownLabels(prevDist, r, state.byes);
-
-    const groups = groupByMatchPoints(prevDist);
-    const sortedPts = Object.keys(groups).map(Number).sort((a, b) => b - a);
-
-    // Skip rounds where there are no active players to pair
-    const hasActivePlayers = sortedPts.some(pts => sumValues(groups[pts]) > 0);
-    if (!hasActivePlayers) continue;
+    const groupInfo = computeRoundPairingInfo(prevDist, r, state.byes);
+    if (groupInfo.length === 0) continue;
 
     const panelBodyId = `round-${r}-body`;
 
@@ -447,87 +623,69 @@ function renderDrawControls() {
     html += `</div>`;
     html += `<div class="message-body" id="${panelBodyId}">`;
 
-    // We need to track carry-down state to know which group has the paired-down game
-    // and what the actual records involved are.
-    // pdLabels[sourcePts] = { carryRecord, opponentRecord }
+    for (let gi = 0; gi < groupInfo.length; gi++) {
+      const g = groupInfo[gi];
 
-    for (const pts of sortedPts) {
-      // Remove bye players from this group's count for display purposes
-      // (same logic as processRound step 1, but we only need the count)
-      let byeCount = 0;
-      for (let i = 0; i < state.byes.length; i++) {
-        if (r <= (i + 1)) byeCount += state.byes[i];
-      }
-      const byeRec = recordKey(r - 1, 0, 0);
-      const rawCount = sumValues(groups[pts]);
-      // Subtract bye players who happen to be in this group
-      let activeCount = rawCount;
-      if (pts === matchPoints(byeRec)) {
-        activeCount = Math.max(0, rawCount - Math.min(byeCount, rawCount));
-      }
-      if (activeCount <= 0) continue;
-
-      // After removing bye players, recalculate games
-      // Also account for: if a carry-down from a HIGHER group lands here,
-      // that carry-down game is separate from the within-group games.
-      // We show the within-group games count (before carry-down is absorbed).
-      const gamesInGroup = Math.floor(activeCount / 2);
-
+      // Group header
       html += `<div class="mb-4">`;
-      html += `<p class="has-text-weight-semibold">${pts} match points (${activeCount} players, ${gamesInGroup} games)</p>`;
+      html += `<p class="has-text-weight-bold is-size-6 mb-2">`;
+      html += `${g.pts} match points &middot; ${g.originalCount} players`;
+      if (g.withinGames > 0) {
+        html += ` &middot; ${g.withinGames} ${g.withinGames === 1 ? 'game' : 'games'}`;
+      }
+      html += `</p>`;
 
-      // Paired-down indicator: this group SENDS a carry-down when it has odd activeCount
-      if (activeCount % 2 === 1) {
-        const nextIdx = sortedPts.indexOf(pts) + 1;
-        const nextPts = sortedPts[nextIdx];
-        const label = pdLabels[pts];
-
-        if (label) {
-          // Show actual records
-          const cdDisplay = displayRecord(label.carryRecord);
-          const oppDisplay = displayRecord(label.opponentRecord);
-          html += `<p class="mb-2"><span class="tag is-warning">Paired-down game: ${cdDisplay} vs ${oppDisplay}</span></p>`;
-
-          const pdId = `pd-${r}-${pts}`;
-          const pdValue = (state.pairedDown[r] && state.pairedDown[r][pts] !== undefined)
-            ? state.pairedDown[r][pts]
-            : 'win';
-
-          html += `<div class="field is-horizontal mb-2">`;
-          html += `<div class="field-label is-normal">`;
-          html += `<label class="label" for="${pdId}">Result</label>`;
-          html += `</div>`;
-          html += `<div class="field-body"><div class="field is-narrow"><div class="control"><div class="select">`;
-          html += `<select id="${pdId}" data-round="${r}" data-pts="${pts}" onchange="handlePairedDownChange(this)">`;
-          html += `<option value="win"${pdValue === 'win' ? ' selected' : ''}>${cdDisplay} player wins</option>`;
-          html += `<option value="loss"${pdValue === 'loss' ? ' selected' : ''}>${cdDisplay} player loses</option>`;
-          html += `<option value="draw"${pdValue === 'draw' ? ' selected' : ''}>Draw</option>`;
-          html += `</select></div></div></div></div>`;
-        } else {
-          // Bottom of the bracket — carry-down gets a bye
-          const nextLabel = nextPts !== undefined ? `${nextPts}-point group` : 'a bye';
-          html += `<p class="mb-2"><span class="tag is-warning">1 player carries down to ${nextLabel}</span></p>`;
-        }
+      // Drawn matches input (only if there are within-group games)
+      if (g.withinGames > 0) {
+        const drawId = `draws-${r}-${g.pts}`;
+        const currentDraws = (state.draws[r] && state.draws[r][g.pts] !== undefined)
+          ? state.draws[r][g.pts]
+          : 0;
+        html += `<div class="field mb-3">`;
+        html += `<label class="label" for="${drawId}">Drawn matches</label>`;
+        html += `<div class="control" style="max-width:6rem">`;
+        html += `<input class="input" type="number" id="${drawId}" `;
+        html += `value="${currentDraws}" min="0" max="${g.withinGames}" `;
+        html += `data-round="${r}" data-pts="${g.pts}" onchange="handleDrawChange(this)">`;
+        html += `</div>`;
+        html += `<p class="help">Out of ${g.withinGames} ${g.withinGames === 1 ? 'game' : 'games'} in this group</p>`;
+        html += `</div>`;
       }
 
-      // Draws input (only if there are games in this group)
-      if (gamesInGroup > 0) {
-        const drawId = `draws-${r}-${pts}`;
-        const currentDraws = (state.draws[r] && state.draws[r][pts] !== undefined)
-          ? state.draws[r][pts]
-          : 0;
-        html += `<div class="field is-horizontal">`;
-        html += `<div class="field-label is-normal">`;
-        html += `<label class="label" for="${drawId}">Draws (max ${gamesInGroup})</label>`;
+      // Paired-down game (this group sends a carry-down to a lower group)
+      if (g.pairedDownGame) {
+        const pd = g.pairedDownGame;
+        const cdDisplay = displayRecord(pd.carryRecord);
+        const oppDisplay = displayRecord(pd.opponentRecord);
+
+        html += `<div class="notification is-warning is-light py-3 px-4 mb-2">`;
+        html += `<p class="has-text-weight-semibold mb-2">Paired down: ${cdDisplay} vs ${oppDisplay}</p>`;
+
+        const pdId = `pd-${r}-${pd.sourcePts}`;
+        const pdValue = (state.pairedDown[r] && state.pairedDown[r][pd.sourcePts] !== undefined)
+          ? state.pairedDown[r][pd.sourcePts]
+          : 'win';
+
+        html += `<div class="field mb-0">`;
+        html += `<label class="label" for="${pdId}">Result</label>`;
+        html += `<div class="control"><div class="select">`;
+        html += `<select id="${pdId}" data-round="${r}" data-pts="${pd.sourcePts}" onchange="handlePairedDownChange(this)">`;
+        html += `<option value="win"${pdValue === 'win' ? ' selected' : ''}>${cdDisplay} player wins</option>`;
+        html += `<option value="loss"${pdValue === 'loss' ? ' selected' : ''}>${cdDisplay} player loses</option>`;
+        html += `<option value="draw"${pdValue === 'draw' ? ' selected' : ''}>Draw</option>`;
+        html += `</select></div></div>`;
         html += `</div>`;
-        html += `<div class="field-body"><div class="field is-narrow"><div class="control">`;
-        html += `<input class="input" type="number" id="${drawId}" `;
-        html += `value="${currentDraws}" min="0" max="${gamesInGroup}" `;
-        html += `data-round="${r}" data-pts="${pts}" onchange="handleDrawChange(this)">`;
-        html += `</div></div></div></div>`;
+        html += `</div>`; // end notification
+      } else if (g.isBottomBye) {
+        html += `<p class="mb-2"><span class="tag is-warning">1 player receives a bye</span></p>`;
       }
 
       html += `</div>`; // end group div
+
+      // Horizontal rule between groups (not after last)
+      if (gi < groupInfo.length - 1) {
+        html += `<hr class="my-3">`;
+      }
     }
 
     html += `</div>`; // end message-body
@@ -546,81 +704,6 @@ function renderDrawControls() {
       }
     });
   });
-}
-
-/**
- * Compute carry-down label info for each source match-point group.
- *
- * Returns an object keyed by source group pts:
- *   { [sourcePts]: { carryRecord: string, opponentRecord: string } }
- *
- * This mirrors the logic in processRound but only tracks identities,
- * not results, so the UI can display "1-0 vs 0-1" style labels.
- */
-function computePairedDownLabels(prevDist, roundNum, byes) {
-  const dist = Object.assign({}, prevDist);
-
-  // Remove bye players
-  for (let i = 0; i < byes.length; i++) {
-    if (roundNum <= (i + 1) && byes[i] > 0) {
-      const byeRec = recordKey(roundNum - 1, 0, 0);
-      const available = dist[byeRec] || 0;
-      const removing = Math.min(byes[i], available);
-      dist[byeRec] = available - removing;
-      if (dist[byeRec] <= 0) delete dist[byeRec];
-    }
-  }
-
-  const groups = groupByMatchPoints(dist);
-  const sortedPts = Object.keys(groups).map(Number).sort((a, b) => b - a);
-
-  const labels = {};
-  let carryDown = null; // { record, sourcePts }
-
-  for (const pts of sortedPts) {
-    const records = Object.assign({}, groups[pts]);
-
-    if (carryDown !== null) {
-      // Find the most-populated record as the opponent (same logic as processRound)
-      const opponentEntries = Object.entries(records)
-        .filter(([, c]) => c > 0)
-        .sort((a, b) => b[1] - a[1]);
-
-      if (opponentEntries.length > 0) {
-        const [oppRec] = opponentEntries[0];
-        // Store label keyed by the SOURCE group's pts
-        labels[carryDown.sourcePts] = {
-          carryRecord: carryDown.record,
-          opponentRecord: oppRec
-        };
-        records[oppRec] -= 1;
-        if (records[oppRec] <= 0) delete records[oppRec];
-      }
-      carryDown = null;
-    }
-
-    // Determine leftover from within-record pairing
-    const recordEntries = Object.entries(records).filter(([, c]) => c > 0);
-
-    const leftovers = [];
-    for (const [rec, count] of recordEntries) {
-      if (count % 2 === 1) leftovers.push(rec);
-    }
-
-    leftovers.sort((a, b) => matchPoints(b) - matchPoints(a));
-
-    // Pair cross-record leftovers
-    while (leftovers.length >= 2) {
-      leftovers.shift();
-      leftovers.shift();
-    }
-
-    if (leftovers.length === 1) {
-      carryDown = { record: leftovers[0], sourcePts: pts };
-    }
-  }
-
-  return labels;
 }
 
 // ============================================================

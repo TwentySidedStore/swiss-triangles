@@ -9,15 +9,31 @@
     /* Triangle table cells */
     .triangle-cell {
       text-align: center;
-      font-weight: 600;
-      min-width: 3.5rem;
+      min-width: 4rem;
       color: #363636;
+      vertical-align: middle;
     }
-    .record-label {
+    .cell-count {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .cell-record {
+      font-size: 0.75rem;
+      color: #7a7a7a;
+    }
+    .cell-multi-record {
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .cell-multi-record .cell-count {
+      font-size: 1rem;
+    }
+    .round-label {
       white-space: nowrap;
+      font-weight: 600;
     }
 
-    /* Sticky first column so record labels stay visible on horizontal scroll */
+    /* Sticky first column so round labels stay visible on horizontal scroll */
     .table-container table th:first-child,
     .table-container table td:first-child {
       position: sticky;
@@ -128,10 +144,10 @@
 
       <!-- HOW TO READ -->
       <div class="notification is-light" id="how-to-read" style="display:none">
-        <strong>How to read the triangle:</strong> Each row is a possible record
-        (W-L or W-L-D). Each column shows how many players hold that record after
-        that round. Use the draw and paired-down controls below to see how those
-        outcomes ripple through future rounds.
+        <strong>How to read the triangle:</strong> Each row is a round of the tournament.
+        Each column is a match-point total. Cells show how many players are at that
+        score after that round, along with their W-L-D record. Use the draw and
+        paired-down controls below to see how those outcomes ripple through future rounds.
       </div>
 
       <!-- TRIANGLE TABLE -->
@@ -150,7 +166,7 @@
   <footer class="footer">
     <div class="content has-text-centered">
       <p>
-        <a href="https://github.com/luislavena/swiss-triangles">Source on GitHub</a>
+        <a href="https://github.com/TwentySidedStore/swiss-triangles">Source on GitHub</a>
       </p>
     </div>
   </footer>
