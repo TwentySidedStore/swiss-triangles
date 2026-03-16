@@ -4,7 +4,7 @@ A simple tool to visualize how Swiss tournament pairings work round by round. Bu
 
 **[Live Site](https://twentysidedstore.github.io/swiss-triangles/)**
 
-![Swiss Triangle Calculator screenshot](screenshot.png)
+![Swiss Triangle Calculator screenshot](https://twentysidedstore.github.io/swiss-triangles/screenshot.png)
 
 ## Features
 
