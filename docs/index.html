@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swiss Triangle Calculator</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
+  <style>
+    /* Triangle table cells */
+    .triangle-cell {
+      text-align: center;
+      font-weight: 600;
+      min-width: 3.5rem;
+      color: #363636;
+    }
+    .record-label {
+      white-space: nowrap;
+    }
+
+    /* Sticky first column so record labels stay visible on horizontal scroll */
+    .table-container table th:first-child,
+    .table-container table td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: #fff;
+    }
+    .table-container table thead th:first-child {
+      z-index: 2;
+      background: #fff;
+    }
+
+    /* Draw-controls toggle button style */
+    .panel-toggle {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0 0.25rem;
+      line-height: 1;
+      color: inherit;
+    }
+    .panel-toggle:focus {
+      outline: 2px solid currentColor;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HERO -->
+  <section class="hero is-primary">
+    <div class="hero-body">
+      <div class="container">
+        <h1 class="title">Swiss Triangle Calculator</h1>
+        <p class="subtitle">Visualize how Swiss pairings and draws affect round-by-round standings</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container" style="max-width:900px">
+
+      <!-- INPUT FORM -->
+      <div class="box">
+        <h2 class="title is-4">Tournament Setup</h2>
+
+        <div class="columns is-mobile is-multiline">
+          <div class="column is-half-mobile is-one-quarter-desktop">
+            <div class="field">
+              <label class="label" for="players">Players</label>
+              <div class="control">
+                <input class="input" type="number" id="players" value="8" min="4" max="512">
+              </div>
+            </div>
+          </div>
+          <div class="column is-half-mobile is-one-quarter-desktop">
+            <div class="field">
+              <label class="label" for="rounds">Rounds</label>
+              <div class="control">
+                <input class="input" type="number" id="rounds" value="3" min="1" max="10">
+              </div>
+              <p class="help">Auto-calculated, but editable</p>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="title is-5 mt-2">Byes</h3>
+        <div class="columns is-mobile is-multiline">
+          <div class="column is-half-mobile is-one-third-tablet">
+            <div class="field">
+              <label class="label" for="byes1">1-Round Bye</label>
+              <div class="control">
+                <input class="input" type="number" id="byes1" value="0" min="0">
+              </div>
+            </div>
+          </div>
+          <div class="column is-half-mobile is-one-third-tablet">
+            <div class="field">
+              <label class="label" for="byes2">2-Round Bye</label>
+              <div class="control">
+                <input class="input" type="number" id="byes2" value="0" min="0">
+              </div>
+            </div>
+          </div>
+          <div class="column is-half-mobile is-one-third-tablet">
+            <div class="field">
+              <label class="label" for="byes3">3-Round Bye</label>
+              <div class="control">
+                <input class="input" type="number" id="byes3" value="0" min="0">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="help is-danger" id="bye-warning" style="display:none">
+          Total byes exceed player count.
+        </p>
+
+        <div class="field mt-4">
+          <div class="control">
+            <button class="button is-primary is-medium" id="generate">
+              Generate Triangle
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- HOW TO READ -->
+      <div class="notification is-light" id="how-to-read" style="display:none">
+        <strong>How to read the triangle:</strong> Each row is a possible record
+        (W-L or W-L-D). Each column shows how many players hold that record after
+        that round. Use the draw and paired-down controls below to see how those
+        outcomes ripple through future rounds.
+      </div>
+
+      <!-- TRIANGLE TABLE -->
+      <div id="triangle-output"></div>
+
+      <!-- ARIA LIVE REGION — single, concise announcements -->
+      <span id="live-announce" class="is-sr-only" aria-live="polite"></span>
+
+      <!-- DRAW & PAIRED-DOWN CONTROLS -->
+      <div id="draw-controls"></div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="content has-text-centered">
+      <p>
+        <a href="https://github.com/luislavena/swiss-triangles">Source on GitHub</a>
+      </p>
+    </div>
+  </footer>
+
+  <script src="swiss.js"></script>
+</body>
+</html>

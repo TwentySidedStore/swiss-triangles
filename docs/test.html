@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swiss Triangle Tests</title>
+  <style>
+    body        { font-family: monospace; padding: 2rem; max-width: 800px; margin: 0 auto; }
+    h1          { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    h2          { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.25rem; }
+    .pass       { color: green; }
+    .fail       { color: red; font-weight: bold; }
+    .summary    { margin-top: 1.5rem; font-size: 1.1rem; font-weight: bold; }
+    .summary.ok { color: green; }
+    .summary.ng { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Swiss Triangle Calculator — Test Suite</h1>
+  <div id="results"></div>
+
+  <!--
+    swiss.js is loaded in "headless" mode here: there is no #players, #rounds, etc.
+    in the DOM, so DOMContentLoaded in swiss.js will call handleGenerate() but
+    querySelector calls will just return null and be silently ignored.
+    We test the pure calculation functions directly.
+  -->
+  <script src="swiss.js"></script>
+  <script>
+    // ---- Minimal test harness ----
+    let passed = 0;
+    let failed = 0;
+    const results = document.getElementById('results');
+
+    function section(title) {
+      results.innerHTML += `<h2>${title}</h2>`;
+    }
+
+    function assert(condition, label) {
+      if (condition) {
+        passed++;
+        results.innerHTML += `<div class="pass">PASS: ${label}</div>`;
+      } else {
+        failed++;
+        results.innerHTML += `<div class="fail">FAIL: ${label}</div>`;
+      }
+    }
+
+    function assertEq(actual, expected, label) {
+      assert(
+        actual === expected,
+        `${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+      );
+    }
+
+    function getCount(roundData, round, record) {
+      return (roundData[round] && roundData[round][record]) || 0;
+    }
+
+    // Helper: reset state and run calculation
+    function runCalc(players, rounds, draws, pairedDown, byes) {
+      state.players   = players;
+      state.rounds    = rounds;
+      state.byes      = byes   || [0, 0, 0];
+      state.draws     = draws  || {};
+      state.pairedDown = pairedDown || {};
+      calculateTriangle();
+      return state.triangleData;
+    }
+
+    function totalPlayers(rd) {
+      return Object.values(rd).reduce((a, b) => a + b, 0);
+    }
+
+    function allIntegers(roundData) {
+      for (const rd of roundData) {
+        for (const count of Object.values(rd)) {
+          if (!Number.isInteger(count) || count < 0) return false;
+        }
+      }
+      return true;
+    }
+
+    // ==========================================================
+    // SECTION 1: Record Utilities
+    // ==========================================================
+    section('Record Utilities');
+
+    assertEq(matchPoints('2-1-0'), 6, 'matchPoints(2-1-0) = 6');
+    assertEq(matchPoints('1-0-1'), 4, 'matchPoints(1-0-1) = 4');
+    assertEq(matchPoints('0-0-3'), 3, 'matchPoints(0-0-3) = 3');
+    assertEq(matchPoints('0-3-0'), 0, 'matchPoints(0-3-0) = 0');
+    assertEq(matchPoints('3-0-0'), 9, 'matchPoints(3-0-0) = 9');
+
+    assertEq(displayRecord('2-1-0'), '2-1',   'displayRecord omits D when 0');
+    assertEq(displayRecord('1-0-1'), '1-0-1', 'displayRecord shows D when > 0');
+    assertEq(displayRecord('0-0-0'), '0-0',   'displayRecord 0-0-0 → "0-0"');
+    assertEq(displayRecord('3-0-0'), '3-0',   'displayRecord 3-0-0 → "3-0"');
+
+    assertEq(addWin('1-1-0'),  '2-1-0', 'addWin');
+    assertEq(addLoss('1-1-0'), '1-2-0', 'addLoss');
+    assertEq(addDraw('1-1-0'), '1-1-1', 'addDraw');
+
+    // ==========================================================
+    // SECTION 2: 8 Players, 3 Rounds, No Draws (Classic Triangle)
+    // ==========================================================
+    section('8 Players · 3 Rounds · No Draws');
+
+    const d8 = runCalc(8, 3);
+
+    // Round 0
+    assertEq(getCount(d8, 0, '0-0-0'), 8, 'R0: 8 players at 0-0-0');
+
+    // Round 1: 4 win, 4 lose
+    assertEq(getCount(d8, 1, '1-0-0'), 4, 'R1: 4 at 1-0');
+    assertEq(getCount(d8, 1, '0-1-0'), 4, 'R1: 4 at 0-1');
+    assertEq(totalPlayers(d8[1]), 8, 'R1: total = 8');
+
+    // Round 2: 1 · 3 · 3 · 1 emerging shape
+    assertEq(getCount(d8, 2, '2-0-0'), 2, 'R2: 2 at 2-0');
+    assertEq(getCount(d8, 2, '1-1-0'), 4, 'R2: 4 at 1-1');
+    assertEq(getCount(d8, 2, '0-2-0'), 2, 'R2: 2 at 0-2');
+    assertEq(totalPlayers(d8[2]), 8, 'R2: total = 8');
+
+    // Round 3: classic 1-3-3-1
+    assertEq(getCount(d8, 3, '3-0-0'), 1, 'R3: 1 at 3-0 (undefeated)');
+    assertEq(getCount(d8, 3, '2-1-0'), 3, 'R3: 3 at 2-1');
+    assertEq(getCount(d8, 3, '1-2-0'), 3, 'R3: 1-2');
+    assertEq(getCount(d8, 3, '0-3-0'), 1, 'R3: 1 at 0-3 (winless)');
+    assertEq(totalPlayers(d8[3]), 8, 'R3: total = 8');
+
+    assert(allIntegers(d8), '8p no-draws: all counts are non-negative integers');
+
+    // ==========================================================
+    // SECTION 3: Player Count Preserved Every Round
+    // ==========================================================
+    section('Player Count Preserved Every Round');
+
+    for (let r = 0; r <= 3; r++) {
+      assertEq(totalPlayers(d8[r]), 8, `8p R${r}: total preserved`);
+    }
+
+    // ==========================================================
+    // SECTION 4: 8 Players, 1 Draw in Round 1
+    // ==========================================================
+    section('8 Players · 1 Draw in Round 1');
+
+    // Round 1 has only the 0-match-point group (all players at 0-0-0).
+    // 1 draw means: 2 players get 0-0-1, 3 win (1-0-0), 3 lose (0-1-0).
+    const d8draw = runCalc(8, 3, { 1: { 0: 1 } });
+
+    assertEq(getCount(d8draw, 1, '1-0-0'), 3, '8p 1draw R1: 3 at 1-0');
+    assertEq(getCount(d8draw, 1, '0-0-1'), 2, '8p 1draw R1: 2 at 0-0-1');
+    assertEq(getCount(d8draw, 1, '0-1-0'), 3, '8p 1draw R1: 3 at 0-1');
+    assertEq(totalPlayers(d8draw[1]), 8, '8p 1draw R1: total = 8');
+
+    assert(allIntegers(d8draw), '8p 1-draw: all counts are non-negative integers');
+
+    // Verify totals preserved across all rounds
+    for (let r = 0; r <= 3; r++) {
+      assertEq(totalPlayers(d8draw[r]), 8, `8p 1draw R${r}: total preserved`);
+    }
+
+    // ==========================================================
+    // SECTION 5: 6 Players, 3 Rounds (Odd Groups, Paired-Down)
+    // ==========================================================
+    section('6 Players · 3 Rounds · No Draws (Odd Groups)');
+
+    const d6 = runCalc(6, 3);
+
+    assert(allIntegers(d6), '6p: all counts are non-negative integers');
+
+    for (let r = 0; r <= 3; r++) {
+      assertEq(totalPlayers(d6[r]), 6, `6p R${r}: total preserved`);
+    }
+
+    // Round 1: 6 players in one group → 3 games, 3 win, 3 lose (no odd here)
+    assertEq(getCount(d6, 1, '1-0-0'), 3, '6p R1: 3 winners');
+    assertEq(getCount(d6, 1, '0-1-0'), 3, '6p R1: 3 losers');
+
+    // ==========================================================
+    // SECTION 6: 6 Players — Paired-Down Loss Changes Distribution
+    // ==========================================================
+    section('6 Players · Paired-Down Result Variation');
+
+    // Default (carry-down wins): check R2 distribution
+    const d6win = runCalc(6, 3, {}, { 1: { 3: 'win' } }); // carry-down (3pts) wins
+    assert(allIntegers(d6win), '6p pd-win: all integers');
+    assertEq(totalPlayers(d6win[2]), 6, '6p pd-win R2: total preserved');
+
+    // Carry-down loses
+    const d6loss = runCalc(6, 3, {}, { 1: { 3: 'loss' } });
+    assert(allIntegers(d6loss), '6p pd-loss: all integers');
+    assertEq(totalPlayers(d6loss[2]), 6, '6p pd-loss R2: total preserved');
+
+    // Carry-down draws
+    const d6draw = runCalc(6, 3, {}, { 1: { 3: 'draw' } });
+    assert(allIntegers(d6draw), '6p pd-draw: all integers');
+    assertEq(totalPlayers(d6draw[2]), 6, '6p pd-draw R2: total preserved');
+
+    // ==========================================================
+    // SECTION 7: 16 Players, 4 Rounds (Larger Event)
+    // ==========================================================
+    section('16 Players · 4 Rounds · No Draws');
+
+    const d16 = runCalc(16, 4);
+    assert(allIntegers(d16), '16p: all counts integers');
+    for (let r = 0; r <= 4; r++) {
+      assertEq(totalPlayers(d16[r]), 16, `16p R${r}: total preserved`);
+    }
+    // Classic 1-4-6-4-1 after 4 rounds with perfect bracket
+    assertEq(getCount(d16, 4, '4-0-0'), 1, '16p R4: 1 at 4-0');
+    assertEq(getCount(d16, 4, '3-1-0'), 4, '16p R4: 4 at 3-1');
+    assertEq(getCount(d16, 4, '2-2-0'), 6, '16p R4: 6 at 2-2');
+    assertEq(getCount(d16, 4, '1-3-0'), 4, '16p R4: 4 at 1-3');
+    assertEq(getCount(d16, 4, '0-4-0'), 1, '16p R4: 1 at 0-4');
+
+    // ==========================================================
+    // SECTION 8: Bye Logic
+    // ==========================================================
+    section('Bye Logic');
+
+    // 8 players, 1 has a 1-round bye.
+    // Active pool R1: 7 players (8 minus the 1 bye player removed before pairing).
+    // 7 is odd: floor(7/2) = 3 games, 1 leftover.
+    //   3 games → 3 wins (1-0-0), 3 losses (0-1-0)
+    //   1 leftover (0-0-0) falls to bottom, no next group → gets a bye win → 1-0-0
+    //   Bye player re-added as 1-0-0
+    //   Total: 3 + 1 + 1 = 5 at 1-0-0; 3 at 0-1-0 (sum = 8)
+    const d8bye1 = runCalc(8, 3, {}, {}, [1, 0, 0]);
+    assert(allIntegers(d8bye1), '8p 1bye: all integers');
+    for (let r = 0; r <= 3; r++) {
+      assertEq(totalPlayers(d8bye1[r]), 8, `8p 1bye R${r}: total preserved`);
+    }
+    assertEq(getCount(d8bye1, 1, '1-0-0'), 5, '8p 1bye R1: 5 at 1-0');
+    assertEq(getCount(d8bye1, 1, '0-1-0'), 3, '8p 1bye R1: 3 at 0-1');
+    assertEq(getCount(d8bye1, 0, '0-0-0'), 8, '8p 1bye R0: start = 8');
+
+    // ==========================================================
+    // SECTION 9: Draw Allocation — Multiple Sub-Groups
+    // ==========================================================
+    section('Draw Allocation Across Sub-Groups');
+
+    // After round 1 with a draw: R2 has groups at 3pts (1-0 players),
+    // 1pt (0-0-1 players), 0pts (0-1 players).
+    // Apply 1 draw to the 3-pt group in R2.
+    const d8dr2 = runCalc(8, 3, { 1: { 0: 1 }, 2: { 3: 1 } });
+    assert(allIntegers(d8dr2), '8p multi-round draws: all integers');
+    for (let r = 0; r <= 3; r++) {
+      assertEq(totalPlayers(d8dr2[r]), 8, `8p multi-draw R${r}: total preserved`);
+    }
+
+    // ==========================================================
+    // SECTION 10: groupByMatchPoints Helper
+    // ==========================================================
+    section('groupByMatchPoints Helper');
+
+    const testDist = { '1-0-0': 4, '0-1-0': 4 };
+    const grouped = groupByMatchPoints(testDist);
+    assert(grouped[3] && grouped[3]['1-0-0'] === 4, 'grouped[3] has 4 at 1-0-0');
+    assert(grouped[0] && grouped[0]['0-1-0'] === 4, 'grouped[0] has 4 at 0-1-0');
+    assert(!grouped[1], 'no group at 1 pts');
+
+    // ==========================================================
+    // SUMMARY
+    // ==========================================================
+    const cls = failed === 0 ? 'ok' : 'ng';
+    results.innerHTML += `<p class="summary ${cls}">${passed} passed, ${failed} failed</p>`;
+  </script>
+</body>
+</html>
